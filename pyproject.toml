@@ -1,0 +1,19 @@
+[project]
+name = "json2vcf"
+version = "0.1.0"
+description = "Convert Nirvana/Illumina Connected Annotations JSON to VCF format"
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+json2vcf = "json2vcf.cli:main"
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
