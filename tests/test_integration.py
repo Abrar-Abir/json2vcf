@@ -10,8 +10,8 @@ from json2vcf.cli import main
 from json2vcf.mapper import map_position_to_vcf_record
 from json2vcf.parser import parse_position_line, stream_positions
 from json2vcf.vcf_writer import write_vcf_header, write_vcf_record
-from json2vcf.models import NirvanaHeader
 from tests.conftest import (
+    make_test_header as _make_header,
     MINIMAL_HEADER,
     TWO_SAMPLE_HEADER,
     MINIMAL_POSITION_SNV,
@@ -21,19 +21,6 @@ from tests.conftest import (
     TWO_SAMPLE_POSITION,
     build_nirvana_json_string,
 )
-
-
-def _make_header(h=None):
-    h = h or MINIMAL_HEADER
-    return NirvanaHeader(
-        annotator=h["annotator"],
-        creation_time=h["creationTime"],
-        genome_assembly=h["genomeAssembly"],
-        schema_version=h["schemaVersion"],
-        data_version=h["dataVersion"],
-        data_sources=h["dataSources"],
-        samples=h["samples"],
-    )
 
 
 def _full_pipeline(positions, header_dict=None, **kwargs):

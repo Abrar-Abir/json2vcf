@@ -1,7 +1,6 @@
 """Tests for the VCF output writer."""
 
 import io
-import json
 
 import pytest
 
@@ -10,31 +9,14 @@ from json2vcf.vcf_writer import (
     write_vcf_header,
     write_vcf_record,
 )
-from json2vcf.models import NirvanaHeader
 from json2vcf.mapper import map_position_to_vcf_record
-from json2vcf.parser import parse_position_line
 from tests.conftest import (
-    MINIMAL_HEADER,
+    make_test_header as _make_header,
+    parse_pos as _parse_pos,
     MINIMAL_POSITION_SNV,
     MULTI_ALLELIC_POSITION,
     SV_POSITION,
 )
-
-
-def _make_header():
-    return NirvanaHeader(
-        annotator=MINIMAL_HEADER["annotator"],
-        creation_time=MINIMAL_HEADER["creationTime"],
-        genome_assembly=MINIMAL_HEADER["genomeAssembly"],
-        schema_version=MINIMAL_HEADER["schemaVersion"],
-        data_version=MINIMAL_HEADER["dataVersion"],
-        data_sources=MINIMAL_HEADER["dataSources"],
-        samples=MINIMAL_HEADER["samples"],
-    )
-
-
-def _parse_pos(d):
-    return parse_position_line(json.dumps(d))
 
 
 class TestVCFHeader:

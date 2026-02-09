@@ -55,6 +55,7 @@ def main(argv=None):
         else:
             out = sys.stdout
 
+        include_samples = not args.no_samples
         header_written = False
         for nirvana_header, position in stream_positions(args.input):
             if not header_written:
@@ -64,7 +65,7 @@ def main(argv=None):
                     else args.assembly
                 )
                 sample_names = (
-                    [] if args.no_samples else nirvana_header.samples
+                    nirvana_header.samples if include_samples else []
                 )
                 write_vcf_header(
                     out, nirvana_header, assembly, sample_names,
@@ -75,11 +76,11 @@ def main(argv=None):
             record = map_position_to_vcf_record(
                 position, nirvana_header,
                 csq_only=args.csq_only,
-                include_samples=not args.no_samples,
+                include_samples=include_samples,
             )
             write_vcf_record(
                 out, record,
-                include_samples=not args.no_samples,
+                include_samples=include_samples,
             )
     finally:
         if out is not None and out is not sys.stdout:

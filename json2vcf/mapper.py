@@ -24,9 +24,8 @@ def _escape_info_value(value: str) -> str:
 
 
 def _fmt_float(value: float) -> str:
-    """Format a float, stripping unnecessary trailing zeros."""
-    s = f"{value:.6g}"
-    return s
+    """Format a float with 6 significant figures."""
+    return f"{value:.6g}"
 
 
 def _get_variant_for_allele(
@@ -93,16 +92,16 @@ def build_csq_string(variant: Variant) -> Optional[str]:
             t.amino_acids or "",                                  # Amino_acids
             t.codons or "",                                       # Codons
             "YES" if t.is_canonical else "",                      # CANONICAL
-            _format_polyphen(t.poly_phen_prediction, t.poly_phen_score),  # PolyPhen
-            _format_sift(t.sift_prediction, t.sift_score),        # SIFT
+            _format_prediction_score(t.poly_phen_prediction, t.poly_phen_score),  # PolyPhen
+            _format_prediction_score(t.sift_prediction, t.sift_score),        # SIFT
         ]
         csq_parts.append("|".join(fields))
 
     return ",".join(csq_parts)
 
 
-def _format_polyphen(prediction: Optional[str], score: Optional[float]) -> str:
-    """Format PolyPhen prediction and score."""
+def _format_prediction_score(prediction: Optional[str], score: Optional[float]) -> str:
+    """Format a prediction tool result (PolyPhen, SIFT) as 'prediction(score)'."""
     if prediction is None:
         return ""
     result = prediction
@@ -111,14 +110,31 @@ def _format_polyphen(prediction: Optional[str], score: Optional[float]) -> str:
     return result
 
 
-def _format_sift(prediction: Optional[str], score: Optional[float]) -> str:
-    """Format SIFT prediction and score."""
-    if prediction is None:
-        return ""
-    result = prediction
-    if score is not None:
-        result += f"({score})"
-    return result
+def _popfreq_extractor(source_attr: str, freq_attr: str):
+    """Return an extractor for a population frequency field on a Variant."""
+    def extract(v):
+        source = getattr(v, source_attr, None)
+        return getattr(source, freq_attr, None) if source else None
+    return extract
+
+
+_POPFREQ_FIELDS = [
+    ("gnomAD_AF",     "gnomad", "all_af", _fmt_float),
+    ("gnomAD_AC",     "gnomad", "all_ac", str),
+    ("gnomAD_AN",     "gnomad", "all_an", str),
+    ("gnomAD_AFR_AF", "gnomad", "afr_af", _fmt_float),
+    ("gnomAD_AMR_AF", "gnomad", "amr_af", _fmt_float),
+    ("gnomAD_EUR_AF", "gnomad", "eur_af", _fmt_float),
+    ("gnomAD_EAS_AF", "gnomad", "eas_af", _fmt_float),
+    ("gnomAD_SAS_AF", "gnomad", "sas_af", _fmt_float),
+    ("oneKG_AF",      "one_kg", "all_af", _fmt_float),
+    ("oneKG_AFR_AF",  "one_kg", "afr_af", _fmt_float),
+    ("oneKG_AMR_AF",  "one_kg", "amr_af", _fmt_float),
+    ("oneKG_EUR_AF",  "one_kg", "eur_af", _fmt_float),
+    ("oneKG_EAS_AF",  "one_kg", "eas_af", _fmt_float),
+    ("oneKG_SAS_AF",  "one_kg", "sas_af", _fmt_float),
+    ("TOPMed_AF",     "topmed", "all_af", _fmt_float),
+]
 
 
 def build_info_field(position: Position, csq_only: bool = False) -> str:
@@ -153,26 +169,10 @@ def build_info_field(position: Position, csq_only: bool = False) -> str:
             str,
         )
 
-        # gnomAD
-        _add_per_allele(parts, position, "gnomAD_AF", lambda v: v.gnomad.all_af if v.gnomad else None, _fmt_float)
-        _add_per_allele(parts, position, "gnomAD_AC", lambda v: v.gnomad.all_ac if v.gnomad else None, str)
-        _add_per_allele(parts, position, "gnomAD_AN", lambda v: v.gnomad.all_an if v.gnomad else None, str)
-        _add_per_allele(parts, position, "gnomAD_AFR_AF", lambda v: v.gnomad.afr_af if v.gnomad else None, _fmt_float)
-        _add_per_allele(parts, position, "gnomAD_AMR_AF", lambda v: v.gnomad.amr_af if v.gnomad else None, _fmt_float)
-        _add_per_allele(parts, position, "gnomAD_EUR_AF", lambda v: v.gnomad.eur_af if v.gnomad else None, _fmt_float)
-        _add_per_allele(parts, position, "gnomAD_EAS_AF", lambda v: v.gnomad.eas_af if v.gnomad else None, _fmt_float)
-        _add_per_allele(parts, position, "gnomAD_SAS_AF", lambda v: v.gnomad.sas_af if v.gnomad else None, _fmt_float)
-
-        # 1000 Genomes
-        _add_per_allele(parts, position, "oneKG_AF", lambda v: v.one_kg.all_af if v.one_kg else None, _fmt_float)
-        _add_per_allele(parts, position, "oneKG_AFR_AF", lambda v: v.one_kg.afr_af if v.one_kg else None, _fmt_float)
-        _add_per_allele(parts, position, "oneKG_AMR_AF", lambda v: v.one_kg.amr_af if v.one_kg else None, _fmt_float)
-        _add_per_allele(parts, position, "oneKG_EUR_AF", lambda v: v.one_kg.eur_af if v.one_kg else None, _fmt_float)
-        _add_per_allele(parts, position, "oneKG_EAS_AF", lambda v: v.one_kg.eas_af if v.one_kg else None, _fmt_float)
-        _add_per_allele(parts, position, "oneKG_SAS_AF", lambda v: v.one_kg.sas_af if v.one_kg else None, _fmt_float)
-
-        # TOPMed
-        _add_per_allele(parts, position, "TOPMed_AF", lambda v: v.topmed.all_af if v.topmed else None, _fmt_float)
+        # Population frequencies (gnomAD, 1000 Genomes, TOPMed)
+        for info_key, source_attr, freq_attr, formatter in _POPFREQ_FIELDS:
+            _add_per_allele(parts, position, info_key,
+                            _popfreq_extractor(source_attr, freq_attr), formatter)
 
         # ClinVar (from first variant that has it — variable number)
         _add_clinvar_info(parts, position)
@@ -229,6 +229,18 @@ def _add_clinvar_info(parts: list, position: Position) -> None:
         parts.append(f"CLINVAR_REVSTAT={_escape_info_value('&'.join(revstats))}")
 
 
+_SPLICE_AI_FIELDS = [
+    ("SpliceAI_AG_SCORE", "acceptor_gain_score", _fmt_float),
+    ("SpliceAI_AG_DIST", "acceptor_gain_distance", str),
+    ("SpliceAI_AL_SCORE", "acceptor_loss_score", _fmt_float),
+    ("SpliceAI_AL_DIST", "acceptor_loss_distance", str),
+    ("SpliceAI_DG_SCORE", "donor_gain_score", _fmt_float),
+    ("SpliceAI_DG_DIST", "donor_gain_distance", str),
+    ("SpliceAI_DL_SCORE", "donor_loss_score", _fmt_float),
+    ("SpliceAI_DL_DIST", "donor_loss_distance", str),
+]
+
+
 def _add_splice_ai_info(parts: list, position: Position) -> None:
     """Add SpliceAI INFO fields from variants."""
     if not position.variants:
@@ -238,22 +250,10 @@ def _add_splice_ai_info(parts: list, position: Position) -> None:
         if not variant.splice_ai:
             continue
         for sai in variant.splice_ai:
-            if sai.acceptor_gain_score is not None:
-                parts.append(f"SpliceAI_AG_SCORE={_fmt_float(sai.acceptor_gain_score)}")
-            if sai.acceptor_gain_distance is not None:
-                parts.append(f"SpliceAI_AG_DIST={sai.acceptor_gain_distance}")
-            if sai.acceptor_loss_score is not None:
-                parts.append(f"SpliceAI_AL_SCORE={_fmt_float(sai.acceptor_loss_score)}")
-            if sai.acceptor_loss_distance is not None:
-                parts.append(f"SpliceAI_AL_DIST={sai.acceptor_loss_distance}")
-            if sai.donor_gain_score is not None:
-                parts.append(f"SpliceAI_DG_SCORE={_fmt_float(sai.donor_gain_score)}")
-            if sai.donor_gain_distance is not None:
-                parts.append(f"SpliceAI_DG_DIST={sai.donor_gain_distance}")
-            if sai.donor_loss_score is not None:
-                parts.append(f"SpliceAI_DL_SCORE={_fmt_float(sai.donor_loss_score)}")
-            if sai.donor_loss_distance is not None:
-                parts.append(f"SpliceAI_DL_DIST={sai.donor_loss_distance}")
+            for info_key, attr_name, formatter in _SPLICE_AI_FIELDS:
+                val = getattr(sai, attr_name)
+                if val is not None:
+                    parts.append(f"{info_key}={formatter(val)}")
 
 
 def build_sample_columns(
@@ -298,20 +298,36 @@ def build_sample_columns(
     return ":".join(format_keys), sample_strings
 
 
+def _scalar_fmt(attr: str, formatter=str):
+    """Create extractor for a scalar sample attribute."""
+    def extract(s):
+        val = getattr(s, attr)
+        return formatter(val) if val is not None else None
+    return extract
+
+
+def _list_fmt(attr: str, formatter=str):
+    """Create extractor for a list sample attribute (comma-joined)."""
+    def extract(s):
+        val = getattr(s, attr)
+        return ",".join(formatter(x) for x in val) if val else None
+    return extract
+
+
 def _get_format_extractors() -> List[Tuple[str, Any]]:
     """Return list of (FORMAT_key, extractor_function) pairs."""
     return [
-        ("DP", lambda s: str(s.total_depth) if s.total_depth is not None else None),
-        ("GQ", lambda s: str(s.genotype_quality) if s.genotype_quality is not None else None),
-        ("AD", lambda s: ",".join(str(x) for x in s.allele_depths) if s.allele_depths else None),
-        ("VF", lambda s: ",".join(_fmt_float(x) for x in s.variant_frequencies) if s.variant_frequencies else None),
-        ("CN", lambda s: str(s.copy_number) if s.copy_number is not None else None),
+        ("DP", _scalar_fmt("total_depth")),
+        ("GQ", _scalar_fmt("genotype_quality")),
+        ("AD", _list_fmt("allele_depths")),
+        ("VF", _list_fmt("variant_frequencies", _fmt_float)),
+        ("CN", _scalar_fmt("copy_number")),
         ("FT", lambda s: ("FAIL" if s.failed_filter else "PASS") if s.failed_filter is not None else None),
         ("DN", lambda s: ("true" if s.is_de_novo else "false") if s.is_de_novo is not None else None),
-        ("DQ", lambda s: _fmt_float(s.de_novo_quality) if s.de_novo_quality is not None else None),
-        ("SR", lambda s: ",".join(str(x) for x in s.split_read_counts) if s.split_read_counts else None),
-        ("PR", lambda s: ",".join(str(x) for x in s.paired_end_read_counts) if s.paired_end_read_counts else None),
-        ("SQ", lambda s: _fmt_float(s.somatic_quality) if s.somatic_quality is not None else None),
+        ("DQ", _scalar_fmt("de_novo_quality", _fmt_float)),
+        ("SR", _list_fmt("split_read_counts")),
+        ("PR", _list_fmt("paired_end_read_counts")),
+        ("SQ", _scalar_fmt("somatic_quality", _fmt_float)),
     ]
 
 
@@ -326,14 +342,13 @@ def map_position_to_vcf_record(
     Returns dict with keys: CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO,
     and optionally FORMAT, samples.
     """
-    # ID: collect dbsnp from all variants, deduplicate
-    ids = []
-    if position.variants:
-        for v in position.variants:
-            if v.dbsnp:
-                for rsid in v.dbsnp:
-                    if rsid not in ids:
-                        ids.append(rsid)
+    # ID: collect dbsnp from all variants, deduplicate preserving order
+    ids = list(dict.fromkeys(
+        rsid
+        for v in (position.variants or [])
+        if v.dbsnp
+        for rsid in v.dbsnp
+    ))
     id_str = ";".join(ids) if ids else "."
 
     # ALT

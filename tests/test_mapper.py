@@ -1,7 +1,5 @@
 """Tests for the JSON-to-VCF field mapping engine."""
 
-import json
-
 import pytest
 
 from json2vcf.mapper import (
@@ -11,10 +9,10 @@ from json2vcf.mapper import (
     map_position_to_vcf_record,
     _escape_info_value,
 )
-from json2vcf.parser import parse_position_line, parse_variant, parse_sample
-from json2vcf.models import NirvanaHeader
+from json2vcf.parser import parse_variant, parse_sample
 from tests.conftest import (
-    MINIMAL_HEADER,
+    make_test_header as _make_header,
+    parse_pos as _parse_pos,
     MINIMAL_POSITION_SNV,
     MULTI_ALLELIC_POSITION,
     REFERENCE_ONLY_POSITION,
@@ -25,22 +23,6 @@ from tests.conftest import (
     FAILED_FILTER_POSITION,
     SPLICE_AI_POSITION,
 )
-
-
-def _make_header():
-    return NirvanaHeader(
-        annotator=MINIMAL_HEADER["annotator"],
-        creation_time=MINIMAL_HEADER["creationTime"],
-        genome_assembly=MINIMAL_HEADER["genomeAssembly"],
-        schema_version=MINIMAL_HEADER["schemaVersion"],
-        data_version=MINIMAL_HEADER["dataVersion"],
-        data_sources=MINIMAL_HEADER["dataSources"],
-        samples=MINIMAL_HEADER["samples"],
-    )
-
-
-def _parse_pos(position_dict):
-    return parse_position_line(json.dumps(position_dict))
 
 
 class TestBasicMapping:

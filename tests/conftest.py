@@ -388,6 +388,29 @@ SPLICE_AI_POSITION = {
 # ============================================================
 
 
+def make_test_header(h=None):
+    """Build a NirvanaHeader from a header dict (defaults to MINIMAL_HEADER)."""
+    from json2vcf.models import NirvanaHeader
+
+    h = h or MINIMAL_HEADER
+    return NirvanaHeader(
+        annotator=h["annotator"],
+        creation_time=h["creationTime"],
+        genome_assembly=h["genomeAssembly"],
+        schema_version=h["schemaVersion"],
+        data_version=h["dataVersion"],
+        data_sources=h["dataSources"],
+        samples=h["samples"],
+    )
+
+
+def parse_pos(position_dict):
+    """Parse a position dict into a Position object (test convenience)."""
+    from json2vcf.parser import parse_position_line
+
+    return parse_position_line(json.dumps(position_dict))
+
+
 def build_nirvana_json_string(header_dict, position_dicts, gene_dicts=None):
     """Build a complete Nirvana JSON string in the line-based streaming format.
 
