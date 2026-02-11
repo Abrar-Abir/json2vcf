@@ -383,6 +383,198 @@ SPLICE_AI_POSITION = {
 }
 
 
+# 10. Insertion with extra context base (normalization test)
+INSERTION_EXTRA_CONTEXT = {
+    "chromosome": "chrY",
+    "position": 2783262,
+    "refAllele": "CA",
+    "altAlleles": ["CAA"],
+    "quality": 100.0,
+    "filters": ["PASS"],
+    "samples": [
+        {
+            "genotype": "0/1",
+            "totalDepth": 30,
+        }
+    ],
+    "variants": [
+        {
+            "vid": "Y-2783262-CA-CAA",
+            "chromosome": "chrY",
+            "begin": 2783262,
+            "end": 2783263,
+            "refAllele": "CA",
+            "altAllele": "CAA",
+            "variantType": "insertion",
+            "gnomad": {"allAf": 0.001},
+            "transcripts": [
+                {
+                    "transcript": "NM_TEST.1",
+                    "source": "RefSeq",
+                    "bioType": "protein_coding",
+                    "geneId": "TEST1",
+                    "hgnc": "TESTGENE",
+                    "consequence": ["intron_variant"],
+                    "isCanonical": True,
+                }
+            ],
+        }
+    ],
+}
+
+# 11. SNV embedded in long allele context (normalization test)
+SNV_LONG_CONTEXT = {
+    "chromosome": "chr1",
+    "position": 10800,
+    "refAllele": "ACACATGCTAGCGCGTCGGGGTG",
+    "altAlleles": ["TCACATGCTAGCGCGTCGGGGTG"],
+    "quality": 200.0,
+    "filters": ["PASS"],
+    "samples": [
+        {
+            "genotype": "0/1",
+            "totalDepth": 40,
+        }
+    ],
+    "variants": [
+        {
+            "vid": "1-10800-A-T",
+            "chromosome": "chr1",
+            "begin": 10800,
+            "end": 10823,
+            "refAllele": "ACACATGCTAGCGCGTCGGGGTG",
+            "altAllele": "TCACATGCTAGCGCGTCGGGGTG",
+            "variantType": "SNV",
+            "phylopScore": 2.1,
+            "transcripts": [
+                {
+                    "transcript": "NM_TEST.2",
+                    "source": "RefSeq",
+                    "bioType": "protein_coding",
+                    "geneId": "TEST2",
+                    "hgnc": "TESTGENE2",
+                    "consequence": ["missense_variant"],
+                    "isCanonical": True,
+                }
+            ],
+        }
+    ],
+}
+
+# 12. Deletion with extra trailing context (normalization test)
+DELETION_EXTRA_SUFFIX = {
+    "chromosome": "chr3",
+    "position": 50000,
+    "refAllele": "CATG",
+    "altAlleles": ["CG"],
+    "quality": 150.0,
+    "filters": ["PASS"],
+    "samples": [
+        {
+            "genotype": "1/1",
+            "totalDepth": 20,
+        }
+    ],
+    "variants": [
+        {
+            "vid": "3-50000-CATG-CG",
+            "chromosome": "chr3",
+            "begin": 50000,
+            "end": 50004,
+            "refAllele": "CATG",
+            "altAllele": "CG",
+            "variantType": "deletion",
+            "gnomad": {"allAf": 0.01},
+        }
+    ],
+}
+
+# 13. Three-ALT multi-allelic (decomposition test)
+THREE_ALT_POSITION = {
+    "chromosome": "chr1",
+    "position": 100,
+    "refAllele": "A",
+    "altAlleles": ["T", "C", "G"],
+    "quality": 300.0,
+    "filters": ["PASS"],
+    "samples": [
+        {
+            "genotype": "1/3",
+            "variantFrequencies": [0.3, 0.0, 0.5],
+            "totalDepth": 60,
+            "alleleDepths": [12, 18, 0, 30],
+        }
+    ],
+    "variants": [
+        {
+            "vid": "1-100-A-T",
+            "chromosome": "chr1",
+            "begin": 100,
+            "end": 100,
+            "refAllele": "A",
+            "altAllele": "T",
+            "variantType": "SNV",
+            "dbsnp": ["rs111"],
+            "gnomad": {"allAf": 0.1},
+            "transcripts": [
+                {
+                    "transcript": "NM_T1.1",
+                    "source": "RefSeq",
+                    "bioType": "protein_coding",
+                    "geneId": "T1",
+                    "hgnc": "GENE_T",
+                    "consequence": ["missense_variant"],
+                    "isCanonical": True,
+                }
+            ],
+        },
+        {
+            "vid": "1-100-A-C",
+            "chromosome": "chr1",
+            "begin": 100,
+            "end": 100,
+            "refAllele": "A",
+            "altAllele": "C",
+            "variantType": "SNV",
+            "gnomad": {"allAf": 0.02},
+            "transcripts": [
+                {
+                    "transcript": "NM_T1.1",
+                    "source": "RefSeq",
+                    "bioType": "protein_coding",
+                    "geneId": "T1",
+                    "hgnc": "GENE_T",
+                    "consequence": ["synonymous_variant"],
+                    "isCanonical": True,
+                }
+            ],
+        },
+        {
+            "vid": "1-100-A-G",
+            "chromosome": "chr1",
+            "begin": 100,
+            "end": 100,
+            "refAllele": "A",
+            "altAllele": "G",
+            "variantType": "SNV",
+            "dbsnp": ["rs333"],
+            "gnomad": {"allAf": 0.001},
+            "transcripts": [
+                {
+                    "transcript": "NM_T1.1",
+                    "source": "RefSeq",
+                    "bioType": "protein_coding",
+                    "geneId": "T1",
+                    "hgnc": "GENE_T",
+                    "consequence": ["stop_gained"],
+                    "isCanonical": True,
+                }
+            ],
+        },
+    ],
+}
+
+
 # ============================================================
 # Helpers
 # ============================================================

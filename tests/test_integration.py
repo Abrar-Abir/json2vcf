@@ -7,7 +7,7 @@ import json
 import pytest
 
 from json2vcf.cli import main
-from json2vcf.mapper import map_position_to_vcf_record
+from json2vcf.mapper import decompose_position, map_position_to_vcf_record
 from json2vcf.parser import parse_position_line, stream_positions
 from json2vcf.vcf_writer import write_vcf_header, write_vcf_record
 from tests.conftest import (
@@ -19,6 +19,10 @@ from tests.conftest import (
     SV_POSITION,
     MISSING_QUAL_POSITION,
     TWO_SAMPLE_POSITION,
+    INSERTION_EXTRA_CONTEXT,
+    SNV_LONG_CONTEXT,
+    DELETION_EXTRA_SUFFIX,
+    THREE_ALT_POSITION,
     build_nirvana_json_string,
 )
 
@@ -28,13 +32,18 @@ def _full_pipeline(positions, header_dict=None, **kwargs):
     header_dict = header_dict or MINIMAL_HEADER
     header = _make_header(header_dict)
 
+    decompose = kwargs.pop("decompose", False)
+    # Separate kwargs for header vs mapper (normalize is mapper-only)
+    header_kwargs = {k: v for k, v in kwargs.items() if k != "normalize"}
     out = io.StringIO()
-    write_vcf_header(out, header, header.genome_assembly, header.samples, **kwargs)
+    write_vcf_header(out, header, header.genome_assembly, header.samples, **header_kwargs)
 
     for pos_dict in positions:
         pos = parse_position_line(json.dumps(pos_dict))
-        record = map_position_to_vcf_record(pos, header, **kwargs)
-        write_vcf_record(out, record)
+        positions_to_map = decompose_position(pos) if decompose else [pos]
+        for p in positions_to_map:
+            record = map_position_to_vcf_record(p, header, **kwargs)
+            write_vcf_record(out, record)
 
     return out.getvalue()
 
@@ -198,3 +207,202 @@ class TestEndToEndViaFile:
         data_lines = [l for l in content.strip().split("\n") if not l.startswith("#")]
         assert len(data_lines) == 1
         assert data_lines[0].startswith("chr1\t12345\trs12345\tA\tT")
+
+
+class TestEndToEndNormalization:
+    """Integration tests for allele normalization through the full pipeline."""
+
+    def test_insertion_normalized_pipeline(self):
+        """Full pipeline normalizes insertion with extra context."""
+        vcf = _full_pipeline([INSERTION_EXTRA_CONTEXT], normalize=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        fields = data_lines[0].split("\t")
+
+        assert fields[1] == "2783262"  # POS unchanged
+        assert fields[3] == "C"       # REF trimmed from CA
+        assert fields[4] == "CA"      # ALT trimmed from CAA
+
+    def test_snv_context_normalized_pipeline(self):
+        """Full pipeline normalizes SNV in long context."""
+        vcf = _full_pipeline([SNV_LONG_CONTEXT], normalize=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        fields = data_lines[0].split("\t")
+
+        assert fields[1] == "10800"
+        assert fields[3] == "A"
+        assert fields[4] == "T"
+
+    def test_no_normalize_flag_preserves(self):
+        """--no-normalize preserves raw Nirvana alleles."""
+        vcf = _full_pipeline([INSERTION_EXTRA_CONTEXT], normalize=False)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        fields = data_lines[0].split("\t")
+
+        assert fields[3] == "CA"
+        assert fields[4] == "CAA"
+
+    def test_snv_identical_with_or_without_normalize(self):
+        """SNV output is identical regardless of normalize flag."""
+        vcf_norm = _full_pipeline([MINIMAL_POSITION_SNV], normalize=True)
+        vcf_raw = _full_pipeline([MINIMAL_POSITION_SNV], normalize=False)
+
+        # Data lines should be identical
+        data_norm = [l for l in vcf_norm.strip().split("\n") if not l.startswith("#")]
+        data_raw = [l for l in vcf_raw.strip().split("\n") if not l.startswith("#")]
+        assert data_norm == data_raw
+
+    def test_normalize_via_cli(self, tmp_path):
+        """CLI --no-normalize flag works end-to-end."""
+        json_str = build_nirvana_json_string(
+            MINIMAL_HEADER, [INSERTION_EXTRA_CONTEXT]
+        )
+        json_path = tmp_path / "test.json.gz"
+        with gzip.open(json_path, "wt", encoding="utf-8") as f:
+            f.write(json_str)
+
+        # Default (normalize=True)
+        out_norm = str(tmp_path / "norm.vcf")
+        main(["-i", str(json_path), "-o", out_norm])
+        with open(out_norm) as f:
+            norm_lines = [l for l in f.read().strip().split("\n") if not l.startswith("#")]
+
+        # With --no-normalize
+        out_raw = str(tmp_path / "raw.vcf")
+        main(["-i", str(json_path), "-o", out_raw, "--no-normalize"])
+        with open(out_raw) as f:
+            raw_lines = [l for l in f.read().strip().split("\n") if not l.startswith("#")]
+
+        norm_fields = norm_lines[0].split("\t")
+        raw_fields = raw_lines[0].split("\t")
+
+        assert norm_fields[3] == "C"    # Normalized REF
+        assert norm_fields[4] == "CA"   # Normalized ALT
+        assert raw_fields[3] == "CA"    # Original REF
+        assert raw_fields[4] == "CAA"   # Original ALT
+
+
+class TestEndToEndDecomposition:
+    """Integration tests for multi-allelic decomposition through the full pipeline."""
+
+    def test_biallelic_unchanged(self):
+        """Single-ALT position unchanged with decompose."""
+        vcf = _full_pipeline([MINIMAL_POSITION_SNV], decompose=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        assert len(data_lines) == 1
+        assert data_lines[0].split("\t")[4] == "T"
+
+    def test_multi_allelic_decomposed_to_two_rows(self):
+        """Two-ALT position produces two VCF rows with decompose."""
+        vcf = _full_pipeline([MULTI_ALLELIC_POSITION], decompose=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        assert len(data_lines) == 2
+        assert data_lines[0].split("\t")[4] == "A"
+        assert data_lines[1].split("\t")[4] == "GT"
+
+    def test_decomposed_info_single_values(self):
+        """Per-allele INFO fields have single values (no commas) after decomposition."""
+        vcf = _full_pipeline([MULTI_ALLELIC_POSITION], decompose=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        info1 = data_lines[0].split("\t")[7]
+        info2 = data_lines[1].split("\t")[7]
+
+        assert "gnomAD_AF=0.05" in info1
+        assert "gnomAD_AF=0.001" in info2
+
+    def test_decomposed_csq_scoped(self):
+        """CSQ only contains transcripts for the relevant ALT."""
+        vcf = _full_pipeline([MULTI_ALLELIC_POSITION], decompose=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        info1 = data_lines[0].split("\t")[7]
+        info2 = data_lines[1].split("\t")[7]
+
+        assert "synonymous_variant" in info1
+        assert "frameshift_variant" not in info1
+        assert "frameshift_variant" in info2
+        assert "synonymous_variant" not in info2
+
+    def test_decomposed_gt_in_output(self):
+        """Decomposed sample GT is remapped in output."""
+        vcf = _full_pipeline([MULTI_ALLELIC_POSITION], decompose=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+
+        # Original GT: 1/2
+        sample1 = data_lines[0].split("\t")[9]
+        sample2 = data_lines[1].split("\t")[9]
+        assert sample1.startswith("1/.")
+        assert sample2.startswith("./1")
+
+    def test_decompose_plus_normalize(self):
+        """Decomposition + normalization produces correct biallelic rows."""
+        vcf = _full_pipeline([MULTI_ALLELIC_POSITION], decompose=True, normalize=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        assert len(data_lines) == 2
+
+    def test_without_decompose_unchanged(self):
+        """Without decompose flag, multi-allelic row stays as one."""
+        vcf = _full_pipeline([MULTI_ALLELIC_POSITION], decompose=False)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        assert len(data_lines) == 1
+        assert data_lines[0].split("\t")[4] == "A,GT"
+
+    def test_decompose_preserves_total_row_count(self):
+        """Mixed input: total output rows = sum of per-position ALT counts."""
+        vcf = _full_pipeline(
+            [MINIMAL_POSITION_SNV, MULTI_ALLELIC_POSITION, SV_POSITION],
+            decompose=True,
+        )
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        # 1 (SNV) + 2 (multi-allelic) + 1 (SV) = 4
+        assert len(data_lines) == 4
+
+    def test_three_alt_decomposed(self):
+        """Three-ALT position produces three VCF rows."""
+        vcf = _full_pipeline([THREE_ALT_POSITION], decompose=True)
+        data_lines = [l for l in vcf.strip().split("\n") if not l.startswith("#")]
+        assert len(data_lines) == 3
+        assert data_lines[0].split("\t")[4] == "T"
+        assert data_lines[1].split("\t")[4] == "C"
+        assert data_lines[2].split("\t")[4] == "G"
+
+    def test_decompose_via_cli(self, tmp_path):
+        """CLI --decompose flag works end-to-end."""
+        json_str = build_nirvana_json_string(
+            MINIMAL_HEADER, [MULTI_ALLELIC_POSITION]
+        )
+        json_path = tmp_path / "test.json.gz"
+        with gzip.open(json_path, "wt", encoding="utf-8") as f:
+            f.write(json_str)
+
+        # Default (no decompose)
+        out_default = str(tmp_path / "default.vcf")
+        main(["-i", str(json_path), "-o", out_default])
+        with open(out_default) as f:
+            default_lines = [l for l in f.read().strip().split("\n") if not l.startswith("#")]
+
+        # With --decompose
+        out_decompose = str(tmp_path / "decompose.vcf")
+        main(["-i", str(json_path), "-o", out_decompose, "--decompose"])
+        with open(out_decompose) as f:
+            decompose_lines = [l for l in f.read().strip().split("\n") if not l.startswith("#")]
+
+        assert len(default_lines) == 1      # Multi-allelic: one row
+        assert len(decompose_lines) == 2    # Decomposed: two rows
+        assert decompose_lines[0].split("\t")[4] == "A"
+        assert decompose_lines[1].split("\t")[4] == "GT"
+
+    def test_decompose_plus_normalize_via_cli(self, tmp_path):
+        """CLI --decompose + --normalize works end-to-end."""
+        json_str = build_nirvana_json_string(
+            MINIMAL_HEADER, [MULTI_ALLELIC_POSITION]
+        )
+        json_path = tmp_path / "test.json.gz"
+        with gzip.open(json_path, "wt", encoding="utf-8") as f:
+            f.write(json_str)
+
+        out_path = str(tmp_path / "output.vcf")
+        main(["-i", str(json_path), "-o", out_path, "--decompose"])
+
+        with open(out_path) as f:
+            data_lines = [l for l in f.read().strip().split("\n") if not l.startswith("#")]
+
+        assert len(data_lines) == 2

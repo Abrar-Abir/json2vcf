@@ -5,7 +5,7 @@ import os
 import sys
 
 from . import __version__
-from .mapper import map_position_to_vcf_record
+from .mapper import decompose_position, map_position_to_vcf_record
 from .parser import stream_positions
 from .vcf_writer import write_vcf_header, write_vcf_record
 
@@ -34,6 +34,22 @@ def main(argv=None):
     parser.add_argument(
         "--assembly", choices=["GRCh37", "GRCh38", "auto"], default="auto",
         help="Genome assembly for contig headers (default: auto from header)",
+    )
+    parser.add_argument(
+        "--normalize", action="store_true", default=True, dest="normalize",
+        help="Normalize allele representations to minimal VCF convention (default: enabled)",
+    )
+    parser.add_argument(
+        "--no-normalize", action="store_false", dest="normalize",
+        help="Disable allele normalization (output raw Nirvana alleles)",
+    )
+    parser.add_argument(
+        "--decompose", action="store_true", default=False, dest="decompose",
+        help="Decompose multi-allelic sites into biallelic rows (like bcftools norm -m-)",
+    )
+    parser.add_argument(
+        "--no-decompose", action="store_false", dest="decompose",
+        help="Keep multi-allelic sites as single rows (default)",
     )
     parser.add_argument(
         "--version", action="version",
@@ -73,15 +89,21 @@ def main(argv=None):
                 )
                 header_written = True
 
-            record = map_position_to_vcf_record(
-                position, nirvana_header,
-                csq_only=args.csq_only,
-                include_samples=include_samples,
+            positions_to_map = (
+                decompose_position(position) if args.decompose
+                else [position]
             )
-            write_vcf_record(
-                out, record,
-                include_samples=include_samples,
-            )
+            for pos in positions_to_map:
+                record = map_position_to_vcf_record(
+                    pos, nirvana_header,
+                    csq_only=args.csq_only,
+                    include_samples=include_samples,
+                    normalize=args.normalize,
+                )
+                write_vcf_record(
+                    out, record,
+                    include_samples=include_samples,
+                )
     finally:
         if out is not None and out is not sys.stdout:
             out.close()

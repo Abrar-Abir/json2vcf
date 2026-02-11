@@ -1,5 +1,6 @@
 """Maps Nirvana Position objects to VCF record dicts."""
 
+from dataclasses import replace
 from typing import Any, Dict, List, Optional, Tuple
 
 from .constants import CSQ_FIELDS
@@ -63,19 +64,189 @@ def _per_allele_values(
     return ",".join(values)
 
 
-def build_csq_string(variant: Variant) -> Optional[str]:
+def normalize_alleles(
+    pos: int, ref: str, alts: List[str]
+) -> Tuple[int, str, List[str]]:
+    """Trim shared prefix/suffix from REF and all ALTs to minimal VCF representation.
+
+    Phase 1: Right-trim shared suffix (all alleles must share the trailing base).
+    Phase 2: Left-trim shared prefix (keeping at least 1 base), adjusting POS.
+
+    Symbolic alleles (<DEL>, etc.), reference-only (ALT='.'), and spanning
+    deletions ('*') are left untouched.
+    """
+    if not alts:
+        return pos, ref, alts
+
+    # Identify which alts are "real" (participate in normalization)
+    real_indices = [
+        i for i, a in enumerate(alts)
+        if a not in (".", "*") and not a.startswith("<")
+    ]
+    if not real_indices:
+        return pos, ref, alts
+
+    new_ref = ref
+    new_alts = list(alts)
+
+    def _all_alleles():
+        return [new_ref] + [new_alts[i] for i in real_indices]
+
+    # Phase 1: Right-trim while all alleles end with same base and all len >= 2
+    while True:
+        alleles = _all_alleles()
+        if min(len(a) for a in alleles) < 2:
+            break
+        if len(set(a[-1] for a in alleles)) != 1:
+            break
+        new_ref = new_ref[:-1]
+        for idx in real_indices:
+            new_alts[idx] = new_alts[idx][:-1]
+
+    # Phase 2: Left-trim while all alleles start with same base and all len >= 2
+    while True:
+        alleles = _all_alleles()
+        if min(len(a) for a in alleles) < 2:
+            break
+        if len(set(a[0] for a in alleles)) != 1:
+            break
+        new_ref = new_ref[1:]
+        for idx in real_indices:
+            new_alts[idx] = new_alts[idx][1:]
+        pos += 1
+
+    return pos, new_ref, new_alts
+
+
+def _remap_genotype(gt: str, target_allele_index: int) -> str:
+    """Remap a multi-allelic genotype to biallelic for one ALT.
+
+    In the original multi-allelic GT:
+      0 = REF, 1 = ALT1, 2 = ALT2, ...
+
+    In the decomposed biallelic GT for ALT at 1-based index *target_allele_index*:
+      0 → 0  (REF stays REF)
+      target → 1  (this ALT becomes the sole ALT)
+      other → .  (other ALTs become missing)
+      . → .  (missing stays missing)
+
+    Preserves phasing: "/" stays "/", "|" stays "|".
+    """
+    sep = "|" if "|" in gt else "/"
+    alleles = gt.split(sep)
+    remapped = []
+    for a in alleles:
+        if a == ".":
+            remapped.append(".")
+        else:
+            idx = int(a)
+            if idx == 0:
+                remapped.append("0")
+            elif idx == target_allele_index:
+                remapped.append("1")
+            else:
+                remapped.append(".")
+    return sep.join(remapped)
+
+
+def _decompose_sample(
+    sample: Sample, target_allele_index: int, num_alts: int,
+) -> Sample:
+    """Create a decomposed sample for one ALT allele from a multi-allelic sample.
+
+    target_allele_index is 1-based (1 for first ALT, 2 for second, etc.).
+    """
+    new_gt = _remap_genotype(sample.genotype, target_allele_index)
+
+    # AD (Number=R): keep [ref_depth, target_alt_depth]
+    new_ad = None
+    if sample.allele_depths is not None and len(sample.allele_depths) > target_allele_index:
+        new_ad = [sample.allele_depths[0], sample.allele_depths[target_allele_index]]
+
+    # VF (Number=A): keep [target_alt_frequency]
+    new_vf = None
+    vf_idx = target_allele_index - 1  # 0-based index into ALT-only list
+    if sample.variant_frequencies is not None and len(sample.variant_frequencies) > vf_idx:
+        new_vf = [sample.variant_frequencies[vf_idx]]
+
+    # SR (Number=R): keep [ref_count, target_alt_count]
+    new_sr = None
+    if sample.split_read_counts is not None and len(sample.split_read_counts) > target_allele_index:
+        new_sr = [sample.split_read_counts[0], sample.split_read_counts[target_allele_index]]
+
+    # PR (Number=R): keep [ref_count, target_alt_count]
+    new_pr = None
+    if sample.paired_end_read_counts is not None and len(sample.paired_end_read_counts) > target_allele_index:
+        new_pr = [sample.paired_end_read_counts[0], sample.paired_end_read_counts[target_allele_index]]
+
+    return replace(
+        sample,
+        genotype=new_gt,
+        allele_depths=new_ad,
+        variant_frequencies=new_vf,
+        split_read_counts=new_sr,
+        paired_end_read_counts=new_pr,
+    )
+
+
+def decompose_position(position: Position) -> List[Position]:
+    """Decompose a multi-allelic Position into biallelic Positions.
+
+    If the Position has 0 or 1 ALT alleles, returns [position] unchanged.
+    Otherwise, returns one Position per ALT allele, each with:
+      - alt_alleles: [single_alt]
+      - variants: [matching_variant] or None
+      - samples: decomposed with remapped GT, sliced AD/VF
+      - All position-level fields (CHROM, POS, REF, QUAL, FILTER) copied
+    """
+    if len(position.alt_alleles) <= 1:
+        return [position]
+
+    num_alts = len(position.alt_alleles)
+    result = []
+
+    for alt_idx_0based, alt_allele in enumerate(position.alt_alleles):
+        alt_idx_1based = alt_idx_0based + 1
+
+        matching_variant = _get_variant_for_allele(position.variants, alt_allele)
+        new_variants = [matching_variant] if matching_variant else None
+
+        new_samples = None
+        if position.samples:
+            new_samples = [
+                _decompose_sample(s, alt_idx_1based, num_alts)
+                for s in position.samples
+            ]
+
+        new_pos = replace(
+            position,
+            alt_alleles=[alt_allele],
+            variants=new_variants,
+            samples=new_samples,
+        )
+        result.append(new_pos)
+
+    return result
+
+
+def build_csq_string(variant: Variant, alt_allele_map: Optional[Dict[str, str]] = None) -> Optional[str]:
     """Build VEP-style CSQ string for one variant (all transcripts).
 
     Returns pipe-delimited transcript annotations separated by commas
-    for multiple transcripts.
+    for multiple transcripts. When alt_allele_map is provided, the CSQ
+    Allele field uses the normalized allele string.
     """
     if not variant.transcripts:
         return None
 
+    csq_allele = variant.alt_allele
+    if alt_allele_map:
+        csq_allele = alt_allele_map.get(variant.alt_allele, variant.alt_allele)
+
     csq_parts = []
     for t in variant.transcripts:
         fields = [
-            variant.alt_allele,                                   # Allele
+            csq_allele,                                           # Allele
             "&".join(t.consequence) if t.consequence else "",     # Consequence
             t.hgnc or "",                                         # SYMBOL
             t.gene_id or "",                                      # Gene
@@ -137,7 +308,10 @@ _POPFREQ_FIELDS = [
 ]
 
 
-def build_info_field(position: Position, csq_only: bool = False) -> str:
+def build_info_field(
+    position: Position, csq_only: bool = False,
+    alt_allele_map: Optional[Dict[str, str]] = None,
+) -> str:
     """Build the INFO column string from position + variant annotations."""
     parts = []
 
@@ -184,7 +358,7 @@ def build_info_field(position: Position, csq_only: bool = False) -> str:
     csq_strings = []
     if position.variants:
         for variant in position.variants:
-            csq = build_csq_string(variant)
+            csq = build_csq_string(variant, alt_allele_map=alt_allele_map)
             if csq:
                 csq_strings.append(csq)
     if csq_strings:
@@ -336,12 +510,29 @@ def map_position_to_vcf_record(
     header: NirvanaHeader,
     csq_only: bool = False,
     include_samples: bool = True,
+    normalize: bool = False,
 ) -> Dict[str, Any]:
     """Convert a Position into a VCF record dict.
 
     Returns dict with keys: CHROM, POS, ID, REF, ALT, QUAL, FILTER, INFO,
     and optionally FORMAT, samples.
+
+    When normalize=True, REF/ALT alleles are trimmed to minimal VCF
+    representation (shared prefix/suffix removed, POS adjusted).
     """
+    # Apply allele normalization if requested
+    vcf_pos = position.position
+    vcf_ref = position.ref_allele
+    vcf_alts = list(position.alt_alleles)
+    alt_allele_map = None
+
+    if normalize and vcf_alts:
+        vcf_pos, vcf_ref, vcf_alts = normalize_alleles(
+            vcf_pos, vcf_ref, vcf_alts
+        )
+        if vcf_alts != list(position.alt_alleles):
+            alt_allele_map = dict(zip(position.alt_alleles, vcf_alts))
+
     # ID: collect dbsnp from all variants, deduplicate preserving order
     ids = list(dict.fromkeys(
         rsid
@@ -352,7 +543,7 @@ def map_position_to_vcf_record(
     id_str = ";".join(ids) if ids else "."
 
     # ALT
-    alt_str = ",".join(position.alt_alleles) if position.alt_alleles else "."
+    alt_str = ",".join(vcf_alts) if vcf_alts else "."
 
     # QUAL
     if position.quality is not None:
@@ -371,13 +562,15 @@ def map_position_to_vcf_record(
         filter_str = ";".join(position.filters)
 
     # INFO
-    info_str = build_info_field(position, csq_only=csq_only)
+    info_str = build_info_field(
+        position, csq_only=csq_only, alt_allele_map=alt_allele_map,
+    )
 
     record = {
         "CHROM": position.chromosome,
-        "POS": position.position,
+        "POS": vcf_pos,
         "ID": id_str,
-        "REF": position.ref_allele,
+        "REF": vcf_ref,
         "ALT": alt_str,
         "QUAL": qual_str,
         "FILTER": filter_str,

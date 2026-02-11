@@ -26,6 +26,8 @@ json2vcf -i input.json.gz -o output.vcf
 json2vcf -i input.json -o output.vcf --csq-only      # VEP-style CSQ only
 json2vcf -i input.json.gz --no-samples                # omit genotype columns
 json2vcf -i input.json.gz --assembly GRCh37           # override assembly
+json2vcf -i input.json.gz --no-normalize              # keep raw Nirvana alleles
+json2vcf -i input.json.gz --decompose                # split multi-allelic → biallelic
 ```
 
 ## Architecture
@@ -57,6 +59,8 @@ Each position maps to one VCF row. Variants are nested per-alt-allele within eac
 - **Assembly contig prefixes:** GRCh38 uses `chr1`…`chrM`; GRCh37 uses `1`…`MT` (no `chr` prefix).
 - **REVEL score parsing:** Can arrive as `{"score": X}` dict or raw float — parser normalizes both.
 - **Float formatting:** `.6g` format (6 significant figures, no trailing zeros).
+- **Allele normalization:** Enabled by default (`--normalize`). Trims shared prefix/suffix from REF/ALT to minimal VCF representation (adjusts POS). Use `--no-normalize` to output raw Nirvana alleles. Implemented in `normalize_alleles()` in mapper.py. Does not perform reference-based left-alignment.
+- **Multi-allelic decomposition:** Disabled by default. Use `--decompose` to split multi-allelic sites into biallelic rows (like `bcftools norm -m-`). Each row gets one ALT, scoped variant/annotations, and remapped sample GT/AD/VF. Implemented in `decompose_position()` in mapper.py. When combined with `--normalize`, decomposition runs first, then each biallelic row is normalized independently.
 
 ## Test Strategy
 
