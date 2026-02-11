@@ -12,7 +12,7 @@ Use `python3` (not `python`) and `python3 -m pytest` (not bare `pytest`).
 
 ```bash
 pip install -e ".[dev]"        # install in dev mode with pytest
-python3 -m pytest -v           # run all 109 tests
+python3 -m pytest -v           # run all 184 tests
 python3 -m pytest tests/test_parser.py -v      # run parser tests only
 python3 -m pytest tests/test_mapper.py -v      # run mapper tests only
 python3 -m pytest tests/test_integration.py -v # run end-to-end tests
@@ -64,4 +64,4 @@ Each position maps to one VCF row. Variants are nested per-alt-allele within eac
 
 ## Test Strategy
 
-All 109 tests are self-contained with embedded test data in `tests/conftest.py` — no external files or network access needed. Test data covers: SNVs, multi-allelic sites, structural variants, missing fields, empty samples, multiple samples, phased genotypes, de novo variants, ClinVar, SpliceAI, REVEL, and failed filters.
+All 184 tests are self-contained with embedded test data in `tests/conftest.py` — no external files or network access needed. Test data covers: SNVs, multi-allelic sites, structural variants, missing fields, empty samples, multiple samples, phased genotypes, de novo variants, ClinVar, SpliceAI, REVEL, failed filters, allele normalization, and multi-allelic decomposition (including GT/AD/VF remapping and 3-ALT sites).

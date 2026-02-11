@@ -8,6 +8,8 @@ Convert [Nirvana/Illumina Connected Annotations](https://illumina.github.io/Nirv
 - Streaming pipeline — processes one position at a time, no full-file load
 - Reads `.json` and `.json.gz` input
 - Supports GRCh37 and GRCh38 assemblies (auto-detected from header)
+- Allele normalization — trims shared prefix/suffix to minimal VCF representation (enabled by default)
+- Multi-allelic decomposition — splits multi-allelic sites into biallelic rows, like `bcftools norm -m-` (`--decompose`)
 - VEP-style CSQ field with per-transcript annotations
 - Annotations: gnomAD, ClinVar, SpliceAI, REVEL, DANN, GERP, phyloP, 1000 Genomes, TOPMed
 
@@ -31,6 +33,12 @@ json2vcf -i input.json.gz -o output.vcf --no-samples
 
 # Override genome assembly
 json2vcf -i input.json.gz -o output.vcf --assembly GRCh37
+
+# Disable allele normalization (keep raw Nirvana alleles)
+json2vcf -i input.json.gz -o output.vcf --no-normalize
+
+# Decompose multi-allelic sites into biallelic rows
+json2vcf -i input.json.gz -o output.vcf --decompose
 
 # Output to stdout
 json2vcf -i input.json.gz
